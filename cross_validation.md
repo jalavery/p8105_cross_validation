@@ -95,3 +95,92 @@ rmse(wiggly_mod, test_df)
 ```
 
     ## [1] 0.3709693
+
+In practice, it’s easiest to not have to do the training/testing split
+by hand and to do the process more than one time. For that we can use
+the `modelr` package.
+
+``` r
+# generate 100 training testing pairs and save into a dataframe
+# id refers to the training/testing split
+# train list column contains the training dataset for that iteration
+cv_df = crossv_mc(nonlin_df, 100) 
+
+# get the training dataframes out of cv_df
+cv_df %>% 
+  pull(train) %>% 
+  .[[1]] %>% 
+  as_tibble
+```
+
+    ## # A tibble: 79 x 3
+    ##       id      x       y
+    ##    <int>  <dbl>   <dbl>
+    ##  1     1 0.266   1.11  
+    ##  2     2 0.372   0.764 
+    ##  3     3 0.573   0.358 
+    ##  4     4 0.908  -3.04  
+    ##  5     5 0.202   1.33  
+    ##  6     6 0.898  -1.99  
+    ##  7     8 0.661  -0.615 
+    ##  8     9 0.629   0.0878
+    ##  9    10 0.0618  0.392 
+    ## 10    11 0.206   1.63  
+    ## # … with 69 more rows
+
+``` r
+# get the testing dataframes out of cv_df
+cv_df %>% 
+  pull(test) %>% 
+  .[[1]] %>% 
+  as_tibble
+```
+
+    ## # A tibble: 21 x 3
+    ##       id      x       y
+    ##    <int>  <dbl>   <dbl>
+    ##  1     7 0.945  -3.27  
+    ##  2    14 0.384   0.938 
+    ##  3    17 0.718  -1.29  
+    ##  4    23 0.652  -0.0535
+    ##  5    27 0.0134  0.0456
+    ##  6    29 0.870  -2.22  
+    ##  7    32 0.600   0.0620
+    ##  8    37 0.794  -1.12  
+    ##  9    47 0.0233 -0.148 
+    ## 10    51 0.478   0.498 
+    ## # … with 11 more rows
+
+``` r
+# repeat for all training and test datasets
+# changes from storing each as a list to storing the entire dataset
+cv_df = cv_df %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+
+# map to run the models and get the root MSE
+cv_df = 
+  cv_df %>% 
+  mutate(linear_mod  = map(train, ~lm(y ~ x, data = .x)),
+         smooth_mod  = map(train, ~mgcv::gam(y ~ s(x), data = .x)),
+         wiggly_mod  = map(train, ~gam(y ~ s(x, k = 30), sp = 10e-6, data = .x))) %>% 
+  mutate(rmse_linear = map2_dbl(linear_mod, test, ~rmse(model = .x, data = .y)),
+         rmse_smooth = map2_dbl(smooth_mod, test, ~rmse(model = .x, data = .y)),
+         rmse_wiggly = map2_dbl(wiggly_mod, test, ~rmse(model = .x, data = .y)))
+```
+
+``` r
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_violin()
+```
+
+![](cross_validation_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
